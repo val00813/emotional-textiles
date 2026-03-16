@@ -8,6 +8,7 @@ and inner growth.
 How to Run
 Open the link below in your browser once GitHub Pages is enabled:
 
+https://github.com/val00813/emotional-textiles
 
 Tools Used
 ● TD
