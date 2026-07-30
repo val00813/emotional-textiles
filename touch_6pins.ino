@@ -1,100 +1,118 @@
 #include "TouchyTouch.h"
 
-const struct {
-  uint8_t pin;         
-  const char* func;    
-  float minVal;        
-  float maxVal;       
-  uint8_t decimal;     
-} TOUCH_CONFIG[] = {
-  {6, "color1",      1.00, 200.00, 0},   
-  {7, "color2",     1.00, 200.00, 0},   
-  {8, "color3",  1.00, 200.00, 0},   
-  {3, "color4",       1.00, 200.00, 0},   
-  {4, "color5",    1.00, 200.00, 0},  
-  {5, "color6",    1.00, 200.00, 0}    
+// Settings for each touch sensor and its corresponding TouchDesigner function.
+struct TouchConfig {
+  uint8_t pin;
+  const char* functionName;
+  float minValue;
+  float maxValue;
+  uint8_t decimalPlaces;
 };
-// 自动计算引脚数量（新增/删除引脚无需修改此值）
-const uint8_t CONFIG_COUNT = sizeof(TOUCH_CONFIG) / sizeof(TOUCH_CONFIG[0]);
 
-// 2. 初始化触摸对象和状态（每个引脚独立）
+const TouchConfig TOUCH_CONFIG[] = {
+  {6, "color1", 1.00, 200.00, 0},
+  {7, "color2", 1.00, 200.00, 0},
+  {8, "color3", 1.00, 200.00, 0},
+  {3, "color4", 1.00, 200.00, 0},
+  {4, "color5", 1.00, 200.00, 0},
+  {5, "color6", 1.00, 200.00, 0}
+};
+
+// The number of sensors is calculated automatically from the configuration above.
+const uint8_t CONFIG_COUNT =
+  sizeof(TOUCH_CONFIG) / sizeof(TOUCH_CONFIG[0]);
+
 TouchyTouch touchSensors[CONFIG_COUNT];
-bool lastTouchStates[CONFIG_COUNT] = {false};  
+unsigned long lastOutputTime[CONFIG_COUNT] = {0};
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
-  Serial.begin(9600); 
-  while (!Serial) delay(10);  
-  
-  randomSeed(analogRead(A0));  
-  
-  Serial.println("=== Arduino 6引脚触摸控制（TD联动）===");
-  for (int i = 0; i < CONFIG_COUNT; i++) {
-    touchSensors[i].begin(TOUCH_CONFIG[i].pin);
-    delay(100); 
-    Serial.print("初始化：引脚");
-    Serial.print(TOUCH_CONFIG[i].pin);
-    Serial.print(" → 功能：");
-    Serial.print(TOUCH_CONFIG[i].func);
-    Serial.print("（范围：");
-    Serial.print(TOUCH_CONFIG[i].minVal);
-    Serial.print("~");
-    Serial.print(TOUCH_CONFIG[i].maxVal);
-    Serial.println("，整数）");
+  Serial.begin(9600);
+
+  // Wait for the serial connection before starting.
+  while (!Serial) {
+    delay(10);
   }
-  Serial.println("--- 触摸引脚即可输出1~200随机数 ---");
+
+  // Use an unconnected analogue input to create less predictable values.
+  randomSeed(analogRead(A0));
+
+  // Initialise each touch sensor using its assigned pin.
+  for (uint8_t i = 0; i < CONFIG_COUNT; i++) {
+    touchSensors[i].begin(TOUCH_CONFIG[i].pin);
+    delay(100);
+  }
 }
 
 void loop() {
-  for (int i = 0; i < CONFIG_COUNT; i++) {
-    touchSensors[i].update(); 
-    bool currentTouch = touchSensors[i].touched();  
-    uint8_t currentPin = TOUCH_CONFIG[i].pin;      
-    const char* currentFunc = TOUCH_CONFIG[i].func; 
-    
-    static unsigned long lastOutputTime[CONFIG_COUNT] = {0};
-    if (currentTouch) {
-      digitalWrite(LED_BUILTIN, HIGH);  
-      
+  for (uint8_t i = 0; i < CONFIG_COUNT; i++) {
+    touchSensors[i].update();
+
+    bool isTouched = touchSensors[i].touched();
+
+    if (isTouched) {
+      digitalWrite(LED_BUILTIN, HIGH);
+
+      // Limit each sensor to one message every 200 milliseconds.
       if (millis() - lastOutputTime[i] > 200) {
-        float paramVal = generateParam(TOUCH_CONFIG[i].minVal, TOUCH_CONFIG[i].maxVal, TOUCH_CONFIG[i].decimal);
-        
-        // 核心：结构化输出（格式：功能名,引脚号,参数值），TD直接解析
-        Serial.print(currentFunc);
+        float parameterValue = generateParameter(
+          TOUCH_CONFIG[i].minValue,
+          TOUCH_CONFIG[i].maxValue,
+          TOUCH_CONFIG[i].decimalPlaces
+        );
+
+        /*
+          Send the data as:
+          function name, pin number, parameter value
+
+          Example:
+          color1,6,125
+        */
+        Serial.print(TOUCH_CONFIG[i].functionName);
         Serial.print(",");
-        Serial.print(currentPin);
+        Serial.print(TOUCH_CONFIG[i].pin);
         Serial.print(",");
-        Serial.println(paramVal, TOUCH_CONFIG[i].decimal);
-        
-        lastOutputTime[i] = millis();  
+        Serial.println(
+          parameterValue,
+          TOUCH_CONFIG[i].decimalPlaces
+        );
+
+        lastOutputTime[i] = millis();
       }
     }
-    
-    lastTouchStates[i] = currentTouch;
   }
-  
+
+  // Turn the LED off once every sensor has been released.
   if (allPinsReleased()) {
     digitalWrite(LED_BUILTIN, LOW);
   }
-  
-  delay(50);  // 全局防抖延迟，减少误触发
+
+  // A short delay helps prevent unstable or accidental triggers.
+  delay(50);
 }
 
-float generateParam(float min, float max, uint8_t decimal) {
-  int scale = pow(10, decimal);  // 缩放系数（decimal=0→1，decimal=2→100）
-  int minInt = min * scale;      // 最小值转整数（1.00→1，1.00→100<小数>）
-  int maxInt = max * scale;      // 最大值转整数（200.00→200，200.00→20000<小数>）
-  
-  int randomInt = random(minInt, maxInt + 1);  // 生成1~200的整数（含200）
-  return (float)randomInt / scale;             // 转回目标格式（整数/小数）
+// Generate a random value within the range assigned to a sensor.
+float generateParameter(
+  float minValue,
+  float maxValue,
+  uint8_t decimalPlaces
+) {
+  int scale = pow(10, decimalPlaces);
+  int scaledMin = minValue * scale;
+  int scaledMax = maxValue * scale;
+
+  int randomValue = random(scaledMin, scaledMax + 1);
+
+  return static_cast<float>(randomValue) / scale;
 }
 
-// 辅助函数2：判断所有引脚是否都释放
+// Check whether all touch sensors have been released.
 bool allPinsReleased() {
-  for (int i = 0; i < CONFIG_COUNT; i++) {
+  for (uint8_t i = 0; i < CONFIG_COUNT; i++) {
     if (touchSensors[i].touched()) {
       return false;
     }
   }
+
   return true;
 }
