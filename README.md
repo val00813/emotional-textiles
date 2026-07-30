@@ -1,9 +1,5 @@
 # Emotional Textiles
 
-**Name:** Emotional Textiles  
-**Date:** March 2026  
-**Author:** Jingyao Li  
-
 ## About
 
 Emotional Textiles is an interactive installation that uses touch-sensitive fabric, Arduino and TouchDesigner to explore emotion, self-identity and inner growth.
